@@ -1,7 +1,9 @@
 import logging
-from typing import Any, Dict, List, Optional, Union
-import credentials
+from typing import Any, List
+
 import praw
+
+import credentials
 
 # Credentials to use PRAW to fetch data
 reddit = praw.Reddit(
@@ -9,11 +11,61 @@ reddit = praw.Reddit(
     client_secret=credentials.CLIENT_SECRET,
     password=credentials.PASSWORD,
     user_agent=credentials.USER_AGENT,
-    username=credentials.USER_NAME
+    username=credentials.USER_NAME,
 )
 
 
-def get_hot_posts(subreddit: Any) -> List[List[str]]:
+class Post:
+    def __init__(self, title: str):
+        self.title = title
+        self.comments = []
+
+    def __str__(self):
+        ans = f"Title: {self.title}\nComments:"
+        for comment in self.comments:
+            ans += f" {comment}"
+        if not len(self.comments):
+            ans += " [none]"
+        ans += "\n"
+        return ans
+
+    def __repr__(self):
+        ans = f"Title: {self.title}\nComments:"
+        for comment in self.comments:
+            ans += f" {comment}"
+        if not len(self.comments):
+            ans += " [none]"
+        ans += "\n"
+        return ans
+
+
+class Comment:
+    def __init__(self, author: str, body: str, depth: int):
+        self.author = author
+        self.body = body
+        self.depth = depth
+        self.replies = []
+
+    def __str__(self):
+        space = "\t" * self.depth
+        ans = f"\n{space}Author: {self.author}\n{space}Comment: {self.body}\n{space}Replies:"
+        for reply in self.replies:
+            ans += f" {reply}"
+        if not len(self.replies):
+            ans += " [none]"
+        ans += "\n"
+        return ans
+
+    def __repr__(self):
+        space = "\t" * self.depth
+        ans = f"\n{space}Author: {self.author}\n{space}Comment: {self.body}\n{space}Replies:"
+        for reply in self.replies:
+            ans += f" {reply}"
+        ans += "\n"
+        return ans
+
+
+def get_hot_posts(subreddit: Any):
     """
     Function to get hot posts of the given subreddit
     Args:
@@ -22,7 +74,7 @@ def get_hot_posts(subreddit: Any) -> List[List[str]]:
         URLs and titles of the posts of the given subreddit
     """
     try:
-        hot_posts: Any = subreddit.hot(limit=5)
+        hot_posts: Any = subreddit.hot(limit=1)
     except Exception as e:
         logging.exception("Posts cannot be fetched" + str(e))
         pass
@@ -34,58 +86,55 @@ def get_hot_posts(subreddit: Any) -> List[List[str]]:
     return [urls, titles]
 
 
-def get_comments(url: str) -> Dict[Optional[str], str]:
+def get_replies(comment: Comment, depth: int) -> List[Comment]:
+    """
+    Function to get replies of a comment
+    Args:
+        comment: Stores the id of the comment
+        depth: Stores the depth of reply in comment forest
+    Returns(List):
+        List of replies of the comment
+    """
+    replies: List[Comment] = []
+    if comment.replies:
+        for reply in comment.replies:
+            myReply = Comment("", "", 0)
+            myReply.body = reply.body.replace("\n", " ").replace("\t", " ")
+            myReply.author = reply.author.name if reply.author else "[deleted]"
+            myReply.depth = depth
+            myReply.replies = get_replies(reply, depth + 1)
+            replies.append(myReply)
+    return replies
+
+
+def get_comments(url: str) -> List[Comment]:
     """
     Function to get top comments of a post
     Args:
         url(str): Stores the URL of a post
-    Returns(dict):
-        Dictionary which consists name of author and its comment
+    Returns(List):
+        List which consists name of author, comment and its replies
     """
-    try:
-        submission: Any = reddit.submission(str(url))
-        comments: Dict[Optional[str], str] = dict()
-        for top_comment in submission.comments:
-            try:
-                comments[get_author(top_comment.id)] = top_comment.body
-            except Exception as e:
-                logging.exception("top_comment does not exist" + str(e))
-                pass
-    except Exception as e:
-        logging.exception("url is invalid" + str(e))
-        pass
+    comments: List[Comment] = []
+    submission: Any = reddit.submission(str(url))
+    for comment in submission.comments:
+        myComment = Comment("", "", 0)
+        myComment.body = comment.body.replace("\n", " ").replace("\t", " ")
+        myComment.author = comment.author.name if comment.author else "[deleted]"
+        myComment.replies = get_replies(comment, 1)
+        comments.append(myComment)
     return comments
 
 
-def get_author(comment_id: str) -> Union[str, None]:
-    """
-    Function to get name of author of a comment
-    Args:
-        comment_id(str): Stores the id of the comment
-    Returns(str):
-        name of the author of the comment
-    """
-    comment: Any = reddit.comment(comment_id)
-    try:
-        author: Any = comment.author
-        if author and author.name:
-            return author.name
-        return None
-    except Exception as e:
-        logging.exception("Comment is removed by the author" + str(e))
-        pass
-    return None
-
-
 if __name__ == "__main__":
-    subreddit_input: str = input("Enter any subreddit: ")
-    subreddit: Any = reddit.subreddit(subreddit_input)
+    subreddit_input = input("Enter any subreddit: ")
+    subreddit = reddit.subreddit(subreddit_input)
     [urls, titles] = get_hot_posts(subreddit)
+    posts = []
 
     for url, title in zip(urls, titles):
-        comments: Dict[Optional[str], str] = get_comments(url)
-        print("========================================================")
-        print(f"Title: {title}\n")
-        print("Comments:\n")
-        for key, value in comments.items():
-            print(f"Name: {key}\nComment: {value}\n")
+        post = Post(title)
+        post.comments = get_comments(url)
+        posts.append(post)
+
+    print(*posts, sep="\n")
